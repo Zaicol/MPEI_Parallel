@@ -46,7 +46,7 @@ void brute_force_md5(const std::string& target_md5, const std::string& character
     const int base = static_cast<int>(characters.size());
     const int total_combinations = static_cast<int>(pow(base, password_length));
 
-#pragma omp parallel for schedule(dynamic) shared(found)
+#pragma omp parallel for schedule(runtime) shared(found)
     for (int i = 0; i < total_combinations; ++i) {
         if (found) continue; // Останавливаем поток, если пароль найден
 

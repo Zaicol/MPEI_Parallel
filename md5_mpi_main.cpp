@@ -117,7 +117,7 @@ int main(int argc, char **argv) {
     const double brute_force_start_time = MPI_Wtime(); // Время начала брутфорса
 
     for (int password_length = max_length; password_length <= max_length; ++password_length) {
-        constexpr int subchunk_size = 50000;
+        constexpr int subchunk_size = 10000;
         const int total_combinations = static_cast<int>(std::pow(characters.size(), password_length));
         const int chunk_size = total_combinations / size;
         if (rank == 0) {
