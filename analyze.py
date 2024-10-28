@@ -54,6 +54,7 @@ def number_shortener(number):
             return f"{int(divided)}k"
         return f"{divided}k"
 
+
 # Функция для запуска программы и сбора времени выполнения
 def run_program(command):
     try:
@@ -66,10 +67,13 @@ def run_program(command):
         print(output)  # для отладки
 
         # Извлечение времени из вывода программы
-        brute_force_time = float(
-            [line.split(": ")[1].split(" ")[0] for line in output.splitlines() if "Brute-force time" in line][0])
         total_time = float(
             [line.split(": ")[1].split(" ")[0] for line in output.splitlines() if "Total execution time" in line][0])
+        try:
+            brute_force_time = float(
+                [line.split(": ")[1].split(" ")[0] for line in output.splitlines() if "Brute-force time" in line][0])
+        except Exception:
+            brute_force_time = total_time
 
         return brute_force_time, total_time
     except subprocess.CalledProcessError as e:
@@ -87,10 +91,12 @@ def run_benchmark(program_type, version, test_word, num_threads, chunk_size=0):
     # Если версия указана как "0", то она приравнивается к пустой строке
 
     if program_type == "m":
+        program_type = "MPI"
         version_suffix = "" if version == "0" else f"_{version}"
         program_name = f"./md5_mpi{version_suffix}"
         command = ["mpirun", "-np", str(num_threads), program_name, test_word]
     elif program_type == "o":
+        program_type = "OpenMP"
         program_name = f"./md5_openmp"
         cs_formatted = number_shortener(chunk_size)
         add_param = f"{OPENMP_V[version]},{cs_formatted}"
@@ -98,9 +104,19 @@ def run_benchmark(program_type, version, test_word, num_threads, chunk_size=0):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)
         os.environ["OMP_SCHEDULE"] = f"{OPENMP_V[version]}{(',' + str(chunk_size)) if chunk_size > 0 else ''}"
         command = [program_name, test_word]
+    elif program_type == "p":
+        program_type = "Pthreads"
+        program_name = f"./md5_pthreads"
+        add_param = f"{version},{number_shortener(chunk_size)}"
+        command = [program_name, test_word, f"--nt={num_threads}", f"--ch={chunk_size}"]
+    elif program_type == "t":
+        program_type = "Thread"
+        program_name = f"./md5_thread"
+        add_param = f"{version},{number_shortener(chunk_size)}"
+        command = [program_name, test_word, f"--nt={num_threads}", f"--ch={chunk_size}"]
     else:
         raise ValueError("Invalid program type. Use 'm' for MPI or 'o' for OpenMP.")
-    print(f"Running {program_type.upper()} with word: {test_word}, "
+    print(f"Running {program_type} with word: {test_word}, "
           f"version: {version}, threads: {num_threads}, chunk: {chunk_size}")
 
     brute_force_time, total_time = run_program(command)
@@ -111,7 +127,7 @@ def run_benchmark(program_type, version, test_word, num_threads, chunk_size=0):
         result = BenchmarkResult(
             system_name=system_name,
             test_datetime=test_datetime,
-            program_type="MPI" if program_type == "m" else "OpenMP",
+            program_type=program_type,
             num_threads=num_threads,
             test_word=test_word,
             brute_force_time=brute_force_time,
@@ -121,7 +137,7 @@ def run_benchmark(program_type, version, test_word, num_threads, chunk_size=0):
 
         # Добавляем и сохраняем запись
         session.add(result)
-        print(f"Test result saved for {program_type.upper()}")
+        print(f"Test result saved for {program_type} {num_threads}t {add_param}")
 
 
 # Настройка аргументов командной строки
@@ -139,26 +155,23 @@ def parse_args():
 if __name__ == "__main__":
     # args = parse_args()
     # run_benchmark(args.program_type, args.version, args.test_word, args.num_threads)
-    tw_list = ["999", "aaaa", "anaB", "anaC", "AAAA", "test", "9999", "passw"]
+    tw_list = ["999", "aaaa", "anaB", "anaC", "AAAA", "test", "9999"]  # , "passw"]
     start_n = 1
     end_n = 12
-    for testword in tw_list[1:]:
-        for np in range(start_n, end_n + 1):
-            run_benchmark('o', 's', testword, np)
-            run_benchmark('o', 'a', testword, np)
-            run_benchmark('o', 'd', testword, np, chunk_size=10000)
-            run_benchmark('o', 's', testword, np, chunk_size=10000)
-            run_benchmark('o', 'a', testword, np, chunk_size=10000)
-            run_benchmark('o', 'd', testword, np, chunk_size=200000)
-            run_benchmark('o', 's', testword, np, chunk_size=200000)
-            run_benchmark('o', 'a', testword, np, chunk_size=200000)
-            # run_benchmark('m', '10k', testword, np)
-            # run_benchmark('m', '50k', testword, np)
-            if np >= 5:
-                run_benchmark('m', 'old', testword, np)
+    for testword in tw_list[:6]:
 
-            if datetime.datetime.now() - last_db_update < datetime.timedelta(milliseconds=7000):
-                sleep(0.7)
+        run_benchmark("p", "default", testword, 6, 10000)
+        run_benchmark("p", "default", testword, 6, 50000)
 
-            last_db_update = datetime.datetime.now()
-            session.commit()
+        # for i in range(start_n, end_n + 1):
+        #     run_benchmark("o", "a", testword, i, 50000)
+        #     run_benchmark("o", "s", testword, i, 50000)
+        #     run_benchmark("o", "d", testword, i, 50000)
+        #     run_benchmark("o", "g", testword, i, 50000)
+
+        if datetime.datetime.now() - last_db_update < datetime.timedelta(milliseconds=7000):
+            sleep(0.7)
+
+        last_db_update = datetime.datetime.now()
+        session.commit()
+        print(f"Test results were committed to the DB")

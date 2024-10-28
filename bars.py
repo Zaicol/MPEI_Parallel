@@ -9,9 +9,9 @@ DATABASE_URL = 'sqlite:///benchmark_results.db'  # Замените на ваш 
 engine = create_engine(DATABASE_URL)
 Session = sessionmaker(bind=engine)
 session = Session()
-nt = 4
+nt = 0
 
-# Шаг 1: Получаем данные из базы данных
+# Получаем данные из базы данных
 results = session.query(BenchmarkResult)
 if nt:
     results = results.filter(BenchmarkResult.num_threads == nt)
@@ -33,7 +33,10 @@ data = {
 
 df = pd.DataFrame(data)
 df = df[~((df['program_type'] == 'MPI') & (df['additional_param'] == 'old'))]
-# Шаг 2: Группируем данные по типу программы, слову и количеству потоков
+df = df[~(df['system_name'] == 'DESKTOP-4EV88DG')]
+df = df[~(df['test_word'] == 'passw')]
+df = df[~(df['test_word'] == '9999')]
+# Группируем данные по типу программы, слову и количеству потоков
 grouped = df.groupby(['system_name', 'test_word', 'num_threads'])
 base_version = ('OpenMP', 'dynamic,0')
 
@@ -50,7 +53,7 @@ def calculate_relative_times(group):
 
 # Функция для расчета относительного времени выполнения
 def calculate_relative_times2(group):
-    # Находим время выполнения основной версии
+    # Находим время выполнения основной верс
     if (group['program_type'] == base_version[0]).any() and (group['additional_param'] == base_version[1]).any():
         base_time = group.loc[
             (group['program_type'] == base_version[0]) &
@@ -68,14 +71,14 @@ def calculate_relative_times2(group):
 # Применяем функцию к каждой группе
 relative_times_df = grouped.apply(calculate_relative_times2).reset_index(drop=True)
 
-# Шаг 3: Рассчитываем средний процент для каждой версии
+# Рассчитываем средний процент для каждой версии
 average_relative_times = relative_times_df.groupby(['program_type', 'additional_param'])[
     'relative_time'].mean().reset_index()
 
-# Шаг 4: Сохраняем в CSV файл
+# Сохраняем в CSV файл
 average_relative_times.to_csv('bars/average_relative_times.csv', index=False)
 
-# Шаг 5: Строим столбчатую диаграмму
+# Строим столбчатую диаграмму
 average_relative_times_sorted = average_relative_times.sort_values(by='relative_time')
 
 plt.figure(figsize=(10, 6))
@@ -88,7 +91,7 @@ plt.grid(axis='x')
 plt.tight_layout()
 
 # Сохранение графика
-plt.savefig(f'bars/comparison_chart3_nt{nt}.png')
+plt.savefig(f'bars/mipt/comparison_chart_nt{nt}.png')
 
 # Показ графика
 plt.show()
