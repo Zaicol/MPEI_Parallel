@@ -113,7 +113,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    string target_password = argv[1];
+    const string target_password = argv[1];
     password_length = static_cast<int>(target_password.size());
 
     target_md5_hash = md5_hash(target_password);
