@@ -76,14 +76,14 @@ average_relative_times = relative_times_df.groupby(['program_type', 'additional_
     'relative_time'].mean().reset_index()
 
 # Сохраняем в CSV файл
-average_relative_times.to_csv('bars/average_relative_times.csv', index=False)
+average_relative_times.to_csv('bars/average_relative_times.csv', index=False, sep="\t")
 
 # Строим столбчатую диаграмму
 average_relative_times_sorted = average_relative_times.sort_values(by='relative_time')
 
 plt.figure(figsize=(10, 6))
-plt.barh(average_relative_times_sorted['additional_param'].astype(str) + ' (' + average_relative_times_sorted[
-    'program_type'] + ')',
+plt.barh(average_relative_times_sorted[
+    'program_type'] + ' (' + average_relative_times_sorted['additional_param'].astype(str) + ')',
          average_relative_times_sorted['relative_time'], color='skyblue')
 plt.xlabel('Среднее относительное время (%)')
 plt.title('Сравнение относительного времени выполнения версий (NP = {})'.format(nt))

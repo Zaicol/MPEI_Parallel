@@ -54,7 +54,7 @@ void brute_force_md5(const string& target_md5, const string& characters, int pas
 
 #pragma omp parallel for schedule(runtime) shared(found)
     for (int i = 0; i < total_combinations; ++i) {
-        if (found) continue; // Останавливаем поток, если пароль найден
+        if (found) break; // Останавливаем поток, если пароль найден
 
         string candidate = convertToBase(i, base, characters, password_length);
 

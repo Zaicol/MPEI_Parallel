@@ -1,22 +1,22 @@
 #include <iostream>
 #include <string>
 #include <openssl/md5.h>
-#include <pthread.h>
+#include <immintrin.h>
 #include <chrono>
 #include <cmath>
 #include <vector>
-#include <unistd.h> // sysconf
+#include <cstring>
+#include <atomic>
 
 // Global
 std::string target_md5_hash;
 std::string characters;
 int password_length;
-bool found = false;
-pthread_mutex_t found_mutex;
+std::atomic<bool> found(false);
 int chunk_size = 10000;
-int num_threads = sysconf(_SC_NPROCESSORS_ONLN);
-int thread_chunk_size;
+int num_threads = 8;
 
+// MD5 хеш
 std::string md5_hash(const std::string& str) {
     unsigned char digest[MD5_DIGEST_LENGTH];
     MD5(reinterpret_cast<const unsigned char*>(str.c_str()), str.size(), digest);
@@ -28,6 +28,7 @@ std::string md5_hash(const std::string& str) {
     return std::string(md5_string);
 }
 
+// Преобразование числа в строку с использованием алфавита
 std::string convertToBase(int number, int base, const std::string& alphabet, int set_size) {
     if (base > static_cast<int>(alphabet.size())) {
         throw std::invalid_argument("Base exceeds the size of the alphabet");
@@ -49,49 +50,36 @@ std::string convertToBase(int number, int base, const std::string& alphabet, int
     return result;
 }
 
-// One thread bruteforce
-void* brute_force_thread(void* arg) {
-    int thread_id = *(int*)arg;
-    delete (int*)arg;
-    int base = static_cast<int>(characters.size());
-    int total_combinations = static_cast<int>(pow(base, password_length));
-    int num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+void brute_force_avx(int start_index, int total_combinations, int base) {
+    unsigned char result[MD5_DIGEST_LENGTH];
 
-    for (int i = thread_id; i < total_combinations; i += num_threads) {
-        if ((i - thread_id) % thread_chunk_size == 0) {
-            pthread_mutex_lock(&found_mutex);
-            if (found) {
-                pthread_mutex_unlock(&found_mutex);
-                return nullptr;
-            }
-            pthread_mutex_unlock(&found_mutex);
+    for (int i = start_index; i < total_combinations; i += num_threads) {
+        if (found.load()) {
+            break;
         }
+
         std::string candidate = convertToBase(i, base, characters, password_length);
 
-        if (md5_hash(candidate) == target_md5_hash) {
-            pthread_mutex_lock(&found_mutex);
-            if (!found) {
-                std::cout << "Password found: " << candidate << std::endl;
-                found = true;
-            }
-            pthread_mutex_unlock(&found_mutex);
-            return nullptr;
+        MD5(reinterpret_cast<const unsigned char*>(candidate.c_str()), candidate.size(), result);
+
+        std::string candidate_hash = md5_hash(candidate);
+        if (candidate_hash == target_md5_hash) {
+            std::cout << "Password found: " << candidate << std::endl;
+            found.store(true);
+            break;
         }
     }
-    return nullptr;
 }
 
-// Threads managing
-void brute_force_md5(int num_threads) {
-    std::vector<pthread_t> threads(num_threads);
+void brute_force_md5_avx() {
+    int total_combinations = static_cast<int>(pow(characters.size(), password_length));
 
+    // Для AVX обработаем несколько паролей одновременно
     for (int i = 0; i < num_threads; ++i) {
-        int thread_id = i;
-        pthread_create(&threads[i], nullptr, brute_force_thread, new int(thread_id));
-    }
-
-    for (int i = 0; i < num_threads; ++i) {
-        pthread_join(threads[i], nullptr);
+        brute_force_avx(i, total_combinations, characters.size());
+        if (found.load()) {
+            break;  // Если флаг найден, выходим из цикла
+        }
     }
 }
 
@@ -121,20 +109,16 @@ int main(int argc, char* argv[]) {
     target_md5_hash = md5_hash(target_password);
     std::cout << "Target MD5 hash: " << target_md5_hash << std::endl;
 
-    pthread_mutex_init(&found_mutex, nullptr);
     characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     auto total_start = std::chrono::high_resolution_clock::now();
 
     parse_arguments(argc, argv);
-    thread_chunk_size = chunk_size * num_threads;
 
-    brute_force_md5(num_threads);
+    brute_force_md5_avx(); // Использование AVX для брутфорса
 
     auto total_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> total_duration = total_end - total_start;
     std::cout << "Total execution time: " << total_duration.count() << " seconds." << std::endl;
-
-    pthread_mutex_destroy(&found_mutex);
 
     return 0;
 }

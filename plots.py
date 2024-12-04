@@ -29,7 +29,7 @@ def plot_brute_force_times(word, db_url='sqlite:///benchmark_results.db'):
         FROM benchmark_results 
         WHERE test_word = '{word}'
         AND (program_type = 'MPI' OR program_type = 'OpenMP')
-        AND system_name = '{platform.node()}'
+        AND system_name != '{platform.node()}'
     """
 
     # Загружаем данные в DataFrame с помощью pandas
@@ -45,11 +45,9 @@ def plot_brute_force_times(word, db_url='sqlite:///benchmark_results.db'):
     # Группировка данных по версиям программы
     versions = ['dynamic,0', 'static,0', 'auto,0',
                 'dynamic,10k', 'static,10k', 'auto,10k',
-                'dynamic,200k', 'static,200k', 'auto,200k',
-                '10k', '50k', 'old']
+                '10k', '50k', 'old', ]
     labels = ['OpenMP dynamic,auto', 'OpenMP static,auto', 'OpenMP auto,auto',
               "OpenMP dynamic,10k", "OpenMP static,10k", "OpenMP auto,10k",
-              "OpenMP dynamic,200k", "OpenMP static,200k", "OpenMP auto,200k",
               'MPI 10k', 'MPI 50k', 'MPI old']
 
     colors = ["#e60049", "#0bb4ff", "#50e991",

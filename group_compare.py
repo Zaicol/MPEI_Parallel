@@ -133,7 +133,7 @@ pd.set_option('display.max_colwidth', None)
 print(statistics_df)
 
 # Сохранение в CSV
-statistics_df.to_csv('version_statistics_no_old.csv', index=False)
+statistics_df.to_csv('version_statistics_no_old.csv', index=False, sep="\t")
 
 # Закрываем сессию
 session.close()
