@@ -7,6 +7,7 @@
 #include <mutex>
 #include <unistd.h>
 #include <chrono>
+#include <iomanip>
 #include <sstream>
 
 #include <immintrin.h> // Для AVX и SSE
@@ -20,6 +21,7 @@ string target_md5_hash;
 string characters;
 int password_length;
 string found_password;
+string target_password_g;
 
 #define mmp _mm256_add_epi32
 
@@ -57,12 +59,46 @@ inline __m256i leftRotate(__m256i x, int n)
 }
 
 // Обработка одного блока (512 бит)
-void processBlock(__m256i &A, __m256i &B, __m256i &C, __m256i &D, const uint8_t *block)
+void processBlock(__m256i &A, __m256i &B, __m256i &C, __m256i &D, const uint8_t block[8][64], bool same_data = false)
 {
     __m256i M[16];
-    for (int i = 0; i < 16; ++i)
+    if (!same_data)
     {
-        M[i] = _mm256_loadu_si256((__m256i*)(block + i * 8));
+        for (int i = 0; i < 16; ++i)
+        {
+            uint32_t word[8]; // Массив для одного слова из 8 блоков
+
+            // Собираем слово из каждого из 8 блоков
+            for (int j = 0; j < 8; ++j)
+            {
+                word[j] = *reinterpret_cast<const uint32_t *>(&block[j][i * 4]); // 4 байта
+            }
+
+            // Загружаем векторное значение
+            M[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(word));
+        }
+    }
+    else
+    {
+        for (int i = 0; i < 8; ++i)
+        {
+            std::cout << "Block " << i << ": ";
+            for (int j = 0; j < 64; ++j)
+            {
+                std::cout << std::hex << (int)block[i][j] << " ";
+            }
+            std::cout << std::endl;
+        }
+        for (int i = 0; i < 16; ++i)
+        {
+            M[i] = _mm256_set1_epi32(*reinterpret_cast<const uint32_t *>(&block[0][i * 4]));
+        }
+        for (int i = 0; i < 16; ++i)
+        {
+            uint32_t value = *reinterpret_cast<const uint32_t *>(&block[0][i * 4]);
+            std::cout << "M[" << i << "] = " << std::hex << value << std::endl;
+            M[i] = _mm256_set1_epi32(value);
+        }
     }
 
     __m256i a = A, b = B, c = C, d = D;
@@ -95,7 +131,7 @@ void processBlock(__m256i &A, __m256i &B, __m256i &C, __m256i &D, const uint8_t 
         else
         {
             f = _mm256_xor_si256(c,
-                                 _mm256_or_si256(b, _mm256_andnot_si256(d, _mm256_set1_epi32(0xFFFFFFFF))));
+                                 _mm256_or_si256(b, _mm256_xor_si256(d, _mm256_set1_epi32(0xFFFFFFFF))));
             g = (7 * i) % 16;
         }
 
@@ -111,6 +147,43 @@ void processBlock(__m256i &A, __m256i &B, __m256i &C, __m256i &D, const uint8_t 
     B = _mm256_add_epi32(B, b);
     C = _mm256_add_epi32(C, c);
     D = _mm256_add_epi32(D, d);
+    alignas(32) uint32_t result_a[8];
+    _mm256_store_si256(reinterpret_cast<__m256i *>(result_a), A);
+
+    for (int i = 0; i < 8; ++i)
+    {
+        std::cout << "Lane " << i << " result: " << std::hex << result_a[i] << std::endl;
+    }
+}
+
+string hashToString(const uint8_t hash[16])
+{
+    ostringstream oss;
+    for (int i = 0; i < 16; ++i)
+    {
+        oss << hex << setw(2) << setfill('0') << (int)hash[i];
+    }
+    return oss.str();
+}
+
+void extractHashes(const __m256i &A, const __m256i &B, const __m256i &C, const __m256i &D, uint8_t hashes[8][16])
+{
+    alignas(32) uint32_t a[8], b[8], c[8], d[8];
+
+    // Извлекаем значения из векторных регистров в массивы
+    _mm256_store_si256(reinterpret_cast<__m256i *>(a), A);
+    _mm256_store_si256(reinterpret_cast<__m256i *>(b), B);
+    _mm256_store_si256(reinterpret_cast<__m256i *>(c), C);
+    _mm256_store_si256(reinterpret_cast<__m256i *>(d), D);
+    // Сохраняем состояния в формате MD5
+    for (int i = 0; i < 8; ++i)
+    {
+        // Копируем 4 байта из каждого состояния
+        memcpy(hashes[i], &a[i], 4);      // Первые 4 байта (A)
+        memcpy(hashes[i] + 4, &b[i], 4);  // Следующие 4 байта (B)
+        memcpy(hashes[i] + 8, &c[i], 4);  // Следующие 4 байта (C)
+        memcpy(hashes[i] + 12, &d[i], 4); // Последние 4 байта (D)
+    }
 }
 
 // Подготовка данных (padding)
@@ -146,7 +219,7 @@ void md5(const uint8_t *data, size_t size, uint8_t *hash)
     __m256i C = _mm256_set1_epi32(0x98BADCFE);
     __m256i D = _mm256_set1_epi32(0x10325476);
 
-    processBlock(A, B, C, D, paddedData);
+    // processBlock(A, B, C, D, paddedData);
 
     // Запись результата в hash
     memcpy(hash, &A, sizeof(A));
@@ -157,17 +230,32 @@ void md5(const uint8_t *data, size_t size, uint8_t *hash)
 
 string md5_hash(const string &str)
 {
-    uint8_t hash[16];
-    md5(reinterpret_cast<const uint8_t *>(str.c_str()), str.length(), hash);
-
-    char md5_string[33];
-    for (int i = 0; i < 16; i++)
+    uint8_t padded_strings[8][64];
+    for (int j = 0; j < 8; j++)
     {
-        sprintf(md5_string + i * 2, "%02x", hash[i]);
+        string converted = str;
+        padData(reinterpret_cast<const uint8_t *>(converted.c_str()), converted.length(), padded_strings[j]);
     }
-    md5_string[32] = '\0';
+    // Начальные значения MD5
+    __m256i A = _mm256_set1_epi32(0x67452301);
+    __m256i B = _mm256_set1_epi32(0xEFCDAB89);
+    __m256i C = _mm256_set1_epi32(0x98BADCFE);
+    __m256i D = _mm256_set1_epi32(0x10325476);
 
-    return string(md5_string);
+    // Обработка блоков
+    processBlock(A, B, C, D, padded_strings, true);
+
+    uint8_t hashes[8][16];
+
+    // Извлекаем значения из векторных регистров в массивы
+    extractHashes(A, B, C, D, hashes);
+
+    for (int i = 0; i < 8; i++)
+    {
+        cout << "Hash " << i + 1 << ": " << hashToString(hashes[i]) << endl;
+    }
+
+    return hashToString(hashes[0]);
 }
 
 string convertToBase(int number, int base, const string &alphabet, int set_size)
@@ -206,10 +294,11 @@ void brute_force_md5()
     {
         // Check 8 passwords at once to increase parallelism
         uint8_t padded_strings[8][64];
+        string passwords[8];
         for (int j = 0; j < 8; j++)
         {
-            string converted = convertToBase(i + j, base, characters, password_length);
-            padData(reinterpret_cast<const uint8_t *>(converted.c_str()), converted.length(), padded_strings[j]);
+            passwords[j] = convertToBase(i + j, base, characters, password_length);
+            padData(reinterpret_cast<const uint8_t *>(passwords[j].c_str()), passwords[j].length(), padded_strings[j]);
         }
         // Начальные значения MD5
         __m256i A = _mm256_set1_epi32(0x67452301);
@@ -218,22 +307,20 @@ void brute_force_md5()
         __m256i D = _mm256_set1_epi32(0x10325476);
 
         // Обработка блоков
-        processBlock(A, B, C, D, paddedData);
+        processBlock(A, B, C, D, padded_strings);
 
-        // Запись результата в hash
-        memcpy(hash, &A, sizeof(A));
-        memcpy(hash + 4, &B, sizeof(B));
-        memcpy(hash + 8, &C, sizeof(C));
-        memcpy(hash + 12, &D, sizeof(D));
+        uint8_t hashes[8][16];
 
-        // old code
-        if (
-            string candidate = convertToBase(i, static_cast<int>(characters.size()), characters, password_length);
-            md5_hash(candidate) == target_md5_hash)
+        // Извлекаем значения из векторных регистров в массивы
+        extractHashes(A, B, C, D, hashes);
+        for (int h = 0; h < 8; ++h)
         {
-            found_password = candidate;
-            cout << "Password found: " << found_password << "\tindex: " << i << endl;
-            break;
+            std::cout << "Hash " << i + h << ": " << hashToString(hashes[h]) << std::endl;
+            if (hashToString(hashes[h]) == target_md5_hash || passwords[h] == target_password_g)
+            {
+                cout << "Password found: " << passwords[h] << "\tindex: " << i + h << endl;
+                return;
+            }
         }
     }
 }
@@ -242,6 +329,7 @@ int main(int argc, char *argv[])
 {
 
     const string target_password = argv[1];
+    target_password_g = target_password;
     password_length = static_cast<int>(target_password.size());
 
     target_md5_hash = md5_hash(target_password);
