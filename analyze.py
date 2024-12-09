@@ -93,11 +93,11 @@ def run_benchmark(program_type, version, test_word, num_threads, chunk_size=0):
     if program_type == "m":
         program_type = "MPI"
         version_suffix = "" if version == "0" else f"_{version}"
-        program_name = f"./md5_mpi{version_suffix}"
+        program_name = f"./code/mpi/md5_mpi{version_suffix}"
         command = ["mpirun", "-np", str(num_threads), program_name, test_word]
     elif program_type == "o":
         program_type = "OpenMP"
-        program_name = f"./md5_openmp"
+        program_name = f"./code/openmp/md5_openmp"
         cs_formatted = number_shortener(chunk_size)
         add_param = f"{OPENMP_V[version]},{cs_formatted}"
         # Задаем количество потоков для OpenMP
@@ -106,14 +106,22 @@ def run_benchmark(program_type, version, test_word, num_threads, chunk_size=0):
         command = [program_name, test_word]
     elif program_type == "p":
         program_type = "Pthreads"
-        program_name = f"./md5_pthreads"
+        program_name = f"./code/pthreads/md5_pthreads"
         add_param = f"{version},{number_shortener(chunk_size)}"
         command = [program_name, test_word, f"--nt={num_threads}", f"--ch={chunk_size}"]
     elif program_type == "t":
         program_type = "Thread"
-        program_name = f"./md5_thread"
+        program_name = f"./code/thread/md5_thread"
         add_param = f"{version},{number_shortener(chunk_size)}"
         command = [program_name, test_word, f"--nt={num_threads}", f"--ch={chunk_size}"]
+    elif program_type == "a":
+        program_type = "AVX/SSE"
+        version_suffix = "" if version == "" else f"_{version}"
+        program_name = f"./code/avxsse/md5_avxsse{version_suffix}"
+        add_param = f"{version}"
+        command = [program_name, test_word]
+        num_threads = 8
+        chunk_size = 0
     else:
         raise ValueError("Invalid program type. Use 'm' for MPI or 'o' for OpenMP.")
     print(f"Running {program_type} with word: {test_word}, "
@@ -158,10 +166,10 @@ if __name__ == "__main__":
     tw_list = ["999", "aaaa", "anaB", "anaC", "AAAA", "test", "9999"]  # , "passw"]
     start_n = 1
     end_n = 12
-    for testword in tw_list[:6]:
+    for testword in tw_list[:2]:
 
-        run_benchmark("p", "default", testword, 6, 10000)
-        run_benchmark("p", "default", testword, 6, 50000)
+        run_benchmark("a", "", testword, 6, 10000)
+        run_benchmark("a", "memcmp", testword, 6, 50000)
 
         # for i in range(start_n, end_n + 1):
         #     run_benchmark("o", "a", testword, i, 50000)
