@@ -1,0 +1,13 @@
+program_type,additional_param,average_position,max_position,min_position,mode_position
+MPI,50k,9.153846153846153,11,1,10
+MPI,10k,8.461538461538462,11,1,9
+MPI,old,10.98076923076923,12,1,12
+OpenMP,"dynamic,10k",2.480769230769231,6,1,1
+OpenMP,"dynamic,200k",4.0,8,1,3
+OpenMP,"auto,10k",5.8076923076923075,9,1,6
+OpenMP,"auto,200k",6.5,11,3,7
+OpenMP,"static,10k",2.8461538461538463,10,1,2
+OpenMP,"static,0",6.346153846153846,9,1,7
+OpenMP,"auto,0",6.384615384615385,10,2,8
+OpenMP,"static,200k",5.076923076923077,11,1,4
+OpenMP,"dynamic,0",9.961538461538462,12,4,11

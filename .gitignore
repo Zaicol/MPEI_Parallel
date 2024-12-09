@@ -1,2 +1,7 @@
 /images
 /.idea
+__pycache__/
+.vscode/
+bars.zip
+chis2.py
+*~

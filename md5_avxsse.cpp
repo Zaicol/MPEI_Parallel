@@ -1,7 +1,5 @@
 #include <iostream>
 #include <string>
-#include <openssl/md5.h>
-#include <thread>
 #include <vector>
 #include <cmath>
 #include <mutex>
@@ -19,14 +17,15 @@ using namespace std;
 // Global
 string target_md5_hash;
 string characters;
-int password_length;
 string found_password;
 string target_password_g;
+int password_length;
+uint8_t target_md5_hash_bytes[16];
 
 #define mmp _mm256_add_epi32
 
 // Таблица синусов MD5
-const __m256i K[64] = {
+const uint32_t K_raw[64] = {
     0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, // K[ 0.. 3]
     0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501, // K[ 4.. 7]
     0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, // K[ 8..11]
@@ -45,6 +44,8 @@ const __m256i K[64] = {
     0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391  // K[60..63]
 };
 
+__m256i K[64];
+
 const int s[64] = {
     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
     5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
@@ -56,6 +57,20 @@ inline __m256i leftRotate(__m256i x, int n)
     __m256i left = _mm256_slli_epi32(x, n);
     __m256i right = _mm256_srli_epi32(x, 32 - n);
     return _mm256_or_si256(left, right);
+}
+
+void printHex(__m256i vec)
+{
+    // Преобразуем в массив 32-битных чисел (int32)
+    alignas(32) int32_t data[8]; // 256 бит = 8 * 32 бита
+    _mm256_store_si256((__m256i *)data, vec);
+
+    // Выводим элементы вектора в формате hex
+    for (int i = 0; i < 8; ++i)
+    {
+        cout << "0x" << hex << setfill('0') << setw(8) << data[i] << " ";
+    }
+    cout << dec << endl; // Возвращаем десятичный формат
 }
 
 // Обработка одного блока (512 бит)
@@ -80,23 +95,23 @@ void processBlock(__m256i &A, __m256i &B, __m256i &C, __m256i &D, const uint8_t 
     }
     else
     {
-        for (int i = 0; i < 8; ++i)
-        {
-            std::cout << "Block " << i << ": ";
-            for (int j = 0; j < 64; ++j)
-            {
-                std::cout << std::hex << (int)block[i][j] << " ";
-            }
-            std::cout << std::endl;
-        }
-        for (int i = 0; i < 16; ++i)
-        {
-            M[i] = _mm256_set1_epi32(*reinterpret_cast<const uint32_t *>(&block[0][i * 4]));
-        }
+        // for (int i = 0; i < 8; ++i)
+        // {
+        //     cout << "Block " << i << ": ";
+        //     for (int j = 0; j < 64; ++j)
+        //     {
+        //         cout << hex << (int)block[i][j] << " ";
+        //     }
+        //     cout << endl;
+        // }
+        // for (int i = 0; i < 16; ++i)
+        // {
+        //     M[i] = _mm256_set1_epi32(*reinterpret_cast<const uint32_t *>(&block[0][i * 4]));
+        // }
         for (int i = 0; i < 16; ++i)
         {
             uint32_t value = *reinterpret_cast<const uint32_t *>(&block[0][i * 4]);
-            std::cout << "M[" << i << "] = " << std::hex << value << std::endl;
+            // cout << "M[" << i << "] = " << hex << value << endl;
             M[i] = _mm256_set1_epi32(value);
         }
     }
@@ -139,7 +154,22 @@ void processBlock(__m256i &A, __m256i &B, __m256i &C, __m256i &D, const uint8_t 
         a = d;
         d = c;
         c = b;
-        b = mmp(leftRotate(mmp(mmp(mmp(temp_a, f), M[g]), K[i]), s[i]), b);
+        b = _mm256_add_epi32(
+            leftRotate(
+                _mm256_add_epi32(
+                    _mm256_add_epi32(
+                        _mm256_add_epi32(temp_a, f), M[g]),
+                    K[i]),
+                s[i]),
+            b);
+        if (i < 0)
+        {
+            printHex(mmp(temp_a, f));
+            printHex(mmp(mmp(temp_a, f), M[g]));
+            printHex(K[i]);
+            cout << "\n"
+                 << endl;
+        }
     }
 
     // Переносится на следующий блок
@@ -150,9 +180,18 @@ void processBlock(__m256i &A, __m256i &B, __m256i &C, __m256i &D, const uint8_t 
     alignas(32) uint32_t result_a[8];
     _mm256_store_si256(reinterpret_cast<__m256i *>(result_a), A);
 
-    for (int i = 0; i < 8; ++i)
+    if (false)
     {
-        std::cout << "Lane " << i << " result: " << std::hex << result_a[i] << std::endl;
+        cout << "\n=======================================\n"
+             << "Line: " << __LINE__ << endl;
+
+        for (int i = 0; i < 8; ++i)
+        {
+            cout << "Lane " << i << " result for A: " << hex << result_a[i] << endl;
+        }
+
+        cout << "\n=======================================\n"
+             << endl;
     }
 }
 
@@ -252,7 +291,7 @@ string md5_hash(const string &str)
 
     for (int i = 0; i < 8; i++)
     {
-        cout << "Hash " << i + 1 << ": " << hashToString(hashes[i]) << endl;
+        // cout << "Hash " << i + 1 << ": " << hashToString(hashes[i]) << endl;
     }
 
     return hashToString(hashes[0]);
@@ -282,6 +321,20 @@ string convertToBase(int number, int base, const string &alphabet, int set_size)
     }
 
     return result;
+}
+
+void md5StringToBytes(const string &hashString, uint8_t *hashBytes)
+{
+    if (hashString.length() != 32)
+    {
+        throw invalid_argument("It is not MD5 hash, MD5 hash has 32 characters.");
+    }
+
+    for (size_t i = 0; i < 16; ++i)
+    {
+        string byteString = hashString.substr(i * 2, 2);
+        hashBytes[i] = static_cast<uint8_t>(stoi(byteString, nullptr, 16));
+    }
 }
 
 // One thread bruteforce
@@ -315,8 +368,9 @@ void brute_force_md5()
         extractHashes(A, B, C, D, hashes);
         for (int h = 0; h < 8; ++h)
         {
-            std::cout << "Hash " << i + h << ": " << hashToString(hashes[h]) << std::endl;
-            if (hashToString(hashes[h]) == target_md5_hash || passwords[h] == target_password_g)
+            // cout << "Hash " << i + h << ": " << hashToString(hashes[h]) << endl;
+            // cout << memcmp(hashes[h], target_md5_hash_bytes, 16) << endl;
+            if (memcmp(hashes[h], target_md5_hash_bytes, 16) == 0)
             {
                 cout << "Password found: " << passwords[h] << "\tindex: " << i + h << endl;
                 return;
@@ -328,11 +382,27 @@ void brute_force_md5()
 int main(int argc, char *argv[])
 {
 
+    for (int i = 0; i < 64; ++i)
+    {
+        K[i] = _mm256_set1_epi32(K_raw[i]);
+    }
+
+    // parsing args
     const string target_password = argv[1];
     target_password_g = target_password;
-    password_length = static_cast<int>(target_password.size());
 
-    target_md5_hash = md5_hash(target_password);
+    if (argc > 2)
+    {
+        password_length = atoi(argv[2]);
+        target_md5_hash = target_password;
+    }
+    else
+    {
+        password_length = static_cast<int>(target_password.size());
+        target_md5_hash = md5_hash(target_password);
+    }
+
+    md5StringToBytes(target_md5_hash, target_md5_hash_bytes);
     cout << "Target MD5 hash: " << target_md5_hash << endl;
 
     characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
