@@ -6,7 +6,7 @@ r1x, r1y = 0, 30
 r1w, r1h = 50, 20
 r2x, r2y = 20, 0
 r2w, r2h = 40, 70
-grid_step = 0.5
+grid_step = 1
 max_iter_ssor = 100
 max_iter_schwarz = 100
 
@@ -44,12 +44,12 @@ class Rectangle:
         global_y_top = self.y + self.height
         global_y_bottom = self.y
 
-        self.matrix[0, :] = func(global_x_vals, global_y_top)
-        self.matrix[-1, :] = func(global_x_vals, global_y_bottom)
+        self.matrix[0, :] = func(global_x_vals, global_y_bottom)
+        self.matrix[-1, :] = func(global_x_vals, global_y_top)
 
         # Левая и правая границы (по столбцам)
         j_vals = np.arange(self.grid_height)
-        global_y_vals = self.y + self.height - self.step * j_vals
+        global_y_vals = self.y + self.step * j_vals
         global_x_left = self.x
         global_x_right = self.x + self.width
 
@@ -94,7 +94,6 @@ class Rectangle:
         j_start_other = int(np.clip(j_start_other, 0, other.grid_height - 1))
         j_end_other = int(np.clip(j_end_other, 0, other.grid_height))
 
-        # Считаем разницу значений
         # Извлечение нужных частей матриц
         roi_g1 = self.matrix[j_start_self:j_end_self + 1, i_start_self:i_end_self + 1]
         roi_g2 = other.matrix[j_start_other:j_end_other, i_start_other:i_end_other]
@@ -177,12 +176,6 @@ class Rectangle:
                             range(j_start_other + 1, j_end_other)):
             self.matrix[j_s][ie_self] = other.matrix[j_o][ie_other]
 
-    def to_global(self, coords: Coords):
-        return Coords(coords.x * self.step + self.x, coords.y * self.step + self.y)
-
-    def to_local(self, coords: Coords):
-        return Coords((coords.x - self.x) // self.step, (coords.y - self.y) // self.step)
-
 
 # Функция f(x, y)
 def f_source(x, y):
@@ -206,6 +199,7 @@ def draw_field(rects: list[Rectangle], clear=True, name="Шварц"):
     for rect in rects:
         all_x += [rect.x, rect.x + rect.width]
         all_y += [rect.y, rect.y + rect.height]
+
         plt.imshow(rect.matrix,
                    origin='lower',
                    interpolation='none',
@@ -253,13 +247,8 @@ def schwartz_method(rectangle1: Rectangle, rectangle2: Rectangle, func, max_it=1
         print(f"Макс. отклонение: {max_diff:.2e}, L2-норма: {l2_norm:.2e}")
 
         if max_diff < EPS:
-            draw_field([rectangle1, rectangle2], name=f"Итерация {iter_num + 1} (финальная)")
+            draw_field([rectangle1, rectangle2], name=f"Итерация {iter_num + 1} (финальная), отклонение: {max_diff:.2e}, L2: {l2_norm:.2e}")
             print("Было достигнуто условие сходимости по max_diff.")
-            break
-
-        if diff1 < EPS and diff2 < EPS:
-            draw_field([rectangle1, rectangle2], name=f"Итерация {iter_num + 1} (финальная)")
-            print("Было достигнуто условие сходимости.")
             break
 
         if iter_num < 5 or (iter_num + 1) % 10 == 0:
