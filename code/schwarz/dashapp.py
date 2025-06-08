@@ -5,7 +5,7 @@ import sys
 import io
 
 
-from schwarz import get_rect, f_source, max_iter_schwarz, max_iter_ssor, schwarz_step, EPS
+from schwarz import get_rect, f_source, max_iter_schwarz, max_iter_ssor, schwarz_step, EPS, Rectangle
 
 
 class Tee:
@@ -45,7 +45,13 @@ app.layout = html.Div([
 ])
 diff1, diff2 = None, None
 global_log_output = None
-
+# rects: list[Rectangle] = []
+# scale = 10
+# rect_num = 2
+# for i in range(0, rect_num):
+#     rect = Rectangle(i * 2 * scale, i * 2 * scale, 3 * scale, 3 * scale, grid_step).set_boundary(boundary)
+#     rects.append(rect)
+# rect1, rect2 = rects
 
 # === Callback для обновления графика ===
 

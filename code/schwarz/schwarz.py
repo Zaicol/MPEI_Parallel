@@ -9,17 +9,20 @@ r2w, r2h = 40, 70
 grid_step = 1
 max_iter_ssor = 100
 max_iter_schwarz = 100
-
+total_schwarz_iterations = 0
 
 OMEGA = 1.8
 EPS = 1e-12
 plt.ion()
 
 
-class Coords:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+class RectCoords:
+    def __init__(self, x_start, y_start, x_end, y_end):
+        self.x_start = x_start
+        self.y_start = y_start
+        self.x_end = x_end
+        self.y_end = y_end
+        print(f"x_start: {self.x_start}, y_start: {self.y_start}, x_end: {self.x_end}, y_end: {self.y_end}")
 
 
 class Rectangle:
@@ -30,8 +33,8 @@ class Rectangle:
         self.height = height
         self.step = step
 
-        self.grid_width = int(width // step + 1)
-        self.grid_height = int(height // step + 1)
+        self.grid_width = int(width // step)
+        self.grid_height = int(height // step)
 
         print(f"grid_width: {self.grid_width}, grid_height: {self.grid_height}")
         self.matrix = np.zeros((self.grid_height, self.grid_width), dtype=float)
@@ -56,125 +59,89 @@ class Rectangle:
         self.matrix[:, 0] = np.vectorize(func)(global_x_left, global_y_vals)
         self.matrix[:, -1] = np.vectorize(func)(global_x_right, global_y_vals)
 
+        return self
+
     def print_matrix(self):
         for row in self.matrix:
             print(' '.join(f"{val:5.2f}" for val in row))
 
-    def compute_norm_in_intersection(self, other) -> [float, float]:
-        """Сливает матрицы в области пересечения, беря значения из other."""
-        # Границы пересечения
+    def get_intersection_coords(self, other) -> RectCoords | None:
+        """
+        Возвращает объект RectCoords с границами пересечения двух областей.
+        Если пересечения нет — возвращает None.
+        """
         x_start = max(self.x, other.x)
         x_end = min(self.x + self.width, other.x + other.width)
         y_start = max(self.y, other.y)
         y_end = min(self.y + self.height, other.y + other.height)
 
         if x_end <= x_start or y_end <= y_start:
+            return None
+        return RectCoords(x_start, y_start, x_end, y_end)
+
+    def get_index_clip(self, rect: RectCoords):
+        """
+        По глобальным координатам rect возвращает кортеж индексов (i_start, i_end, j_start, j_end)
+        для среза матрицы: [j_start:j_end+1, i_start:i_end+1]
+        """
+        i_start = int(round((rect.x_start - self.x) / self.step))
+        i_end = int(round((rect.x_end - self.x) / self.step))
+        j_start = int(round((rect.y_start - self.y) / self.step))
+        j_end = int(round((rect.y_end - self.y) / self.step))
+
+        i_start = np.clip(i_start, 0, self.grid_width)
+        i_end = np.clip(i_end, 0, self.grid_width)
+        j_start = np.clip(j_start, 0, self.grid_height)
+        j_end = np.clip(j_end, 0, self.grid_height)
+
+        return i_start, i_end, j_start, j_end
+
+    def compute_norm_in_intersection(self, other):
+        rect = self.get_intersection_coords(other)
+        if rect is None:
             return
 
-        # Индексы в self
-        i_start_self = round((x_start - self.x) / self.step)
-        i_end_self = round((x_end - self.x) / self.step) + 1
-        j_start_self = round((y_start - self.y) / self.step)
-        j_end_self = round((y_end - self.y) / self.step) + 1
+        i_start_self, i_end_self, j_start_self, j_end_self = self.get_index_clip(rect)
+        i_start_other, i_end_other, j_start_other, j_end_other = other.get_index_clip(rect)
 
-        # Индексы в other
-        i_start_other = int(round((x_start - other.x) / other.step))
-        i_end_other = int(round((x_end - other.x) / other.step)) + 1
-        j_start_other = int(round((y_start - other.y) / other.step))
-        j_end_other = int(round((y_end - other.y) / other.step)) + 1
-
-        # Обрезаем до допустимых размеров (защита от выхода за границы)
-        i_start_self = int(np.clip(i_start_self, 0, self.grid_width - 1))
-        i_end_self = int(np.clip(i_end_self, 0, self.grid_width))
-        j_start_self = int(np.clip(j_start_self, 0, self.grid_height - 1))
-        j_end_self = int(np.clip(j_end_self, 0, self.grid_height))
-
-        i_start_other = int(np.clip(i_start_other, 0, other.grid_width - 1))
-        i_end_other = int(np.clip(i_end_other, 0, other.grid_width))
-        j_start_other = int(np.clip(j_start_other, 0, other.grid_height - 1))
-        j_end_other = int(np.clip(j_end_other, 0, other.grid_height))
-
-        # Извлечение нужных частей матриц
-        roi_g1 = self.matrix[j_start_self:j_end_self + 1, i_start_self:i_end_self + 1]
+        roi_g1 = self.matrix[j_start_self:j_end_self, i_start_self:i_end_self]
         roi_g2 = other.matrix[j_start_other:j_end_other, i_start_other:i_end_other]
 
-        # Проверка совпадения форм
         assert roi_g1.shape == roi_g2.shape, "Размерности областей не совпадают"
 
-        # Вычисление разностей
         diff = np.abs(roi_g1 - roi_g2)
-
-        # Максимальная разность
         max_diff = np.max(diff)
-
-        # Сумма квадратов
         sum_sq = np.sum(diff ** 2)
-
-        # Число точек
         n_points = roi_g1.size
-
-        # L2 норма
         l2_norm = np.sqrt(sum_sq / n_points)
 
         return max_diff, l2_norm
 
     def merge_from_intersection_perimeter(self, other):
-        """Копирует в self только периметр области other, лежащий в области пересечения."""
-
-        # Границы пересечения
-        x_start = max(self.x, other.x)
-        x_end = min(self.x + self.width, other.x + other.width)
-        y_start = max(self.y, other.y)
-        y_end = min(self.y + self.height, other.y + other.height)
-
-        if x_end <= x_start or y_end <= y_start:
+        rect = self.get_intersection_coords(other)
+        if rect is None:
             return
 
-        # Общая функция для пересчёта координат в индексы
-        def to_index_x(rect, x):
-            return int(round((x - rect.x) / rect.step))
+        i_start_self, i_end_self, j_start_self, j_end_self = self.get_index_clip(rect)
+        i_start_other, i_end_other, j_start_other, j_end_other = other.get_index_clip(rect)
 
-        def to_index_y(rect, y):
-            return int(round((y - rect.y) / rect.step))
+        # Выделяем пересекающиеся области
+        self_roi = self.matrix[j_start_self:j_end_self, i_start_self:i_end_self]
+        other_roi = other.matrix.copy()[j_start_other:j_end_other, i_start_other:i_end_other]
 
-        # Индексы по x и y в обоих прямоугольниках
-        i_start_self = np.clip(to_index_x(self, x_start), 0, self.grid_width - 1)
-        i_end_self = np.clip(to_index_x(self, x_end), 0, self.grid_width - 1)
-        j_start_self = np.clip(to_index_y(self, y_start), 0, self.grid_height - 1)
-        j_end_self = np.clip(to_index_y(self, y_end), 0, self.grid_height - 1)
+        # Создаем маску для периметра (остальные значения станут np.nan)
+        mask = np.full_like(self.matrix, False, dtype=bool)
+        mask[0, :] = True  # верхняя строка
+        mask[-1, :] = True  # нижняя строка
+        mask[:, 0] = True  # левая колонка
+        mask[:, -1] = True  # правая колонка
 
-        i_start_other = np.clip(to_index_x(other, x_start), 0, other.grid_width - 1)
-        i_end_other = np.clip(to_index_x(other, x_end), 0, other.grid_width - 1)
-        j_start_other = np.clip(to_index_y(other, y_start), 0, other.grid_height - 1)
-        j_end_other = np.clip(to_index_y(other, y_end), 0, other.grid_height - 1)
+        self_masked = np.where(mask, self.matrix.copy(), np.nan)[j_start_self:j_end_self, i_start_self:i_end_self]
 
-        # --- TOP row (y = y_start) ---
-        js_self = j_start_self
-        js_other = j_start_other
-        for i_s, i_o in zip(range(i_start_self, i_end_self + 1),
-                            range(i_start_other, i_end_other + 1)):
-            self.matrix[js_self][i_s] = other.matrix[js_other][i_o]
+        # Копируем только не-nan значения из other_masked в self_roi_part
+        np.copyto(self_roi, other_roi, where=~np.isnan(self_masked))
 
-        # --- BOTTOM row (y = y_end) ---
-        je_self = j_end_self
-        je_other = j_end_other
-        for i_s, i_o in zip(range(i_start_self, i_end_self + 1),
-                            range(i_start_other, i_end_other + 1)):
-            self.matrix[je_self][i_s] = other.matrix[je_other][i_o]
-
-        # --- LEFT column (x = x_start) ---
-        is_self = i_start_self
-        is_other = i_start_other
-        for j_s, j_o in zip(range(j_start_self + 1, j_end_self),  # без углов, чтобы не дублировать
-                            range(j_start_other + 1, j_end_other)):
-            self.matrix[j_s][is_self] = other.matrix[j_o][is_other]
-
-        # --- RIGHT column (x = x_end) ---
-        ie_self = i_end_self
-        ie_other = i_end_other
-        for j_s, j_o in zip(range(j_start_self + 1, j_end_self),
-                            range(j_start_other + 1, j_end_other)):
-            self.matrix[j_s][ie_self] = other.matrix[j_o][ie_other]
+        return self
 
 
 # Функция f(x, y)
@@ -185,6 +152,10 @@ def f_source(x, y):
 # Граничное условие
 def boundary(x, y):
     return 1
+
+
+def boundary2(x, y):
+    return 2
 
 
 def draw_field(rects: list[Rectangle], clear=True, name="Шварц"):
@@ -222,37 +193,50 @@ def draw_field(rects: list[Rectangle], clear=True, name="Шварц"):
 
 
 def schwarz_step(rectangle1: Rectangle, rectangle2: Rectangle, func, max_ssor_it=10000):
-    print("Solving G2...")
-    diff1 = SSOR(rectangle2, func, max_ssor_it)
+    max_diff, l2_norm = None, None
 
-    # Копируем данные из G2 в G1
-    rectangle1.merge_from_intersection_perimeter(rectangle2)
+    intersection = rectangle1.get_intersection_coords(rectangle2)
+    print("Solving G2...")
+    SSOR(rectangle2, func, max_ssor_it)
+
+    if intersection is not None:
+        # Копируем данные из G2 в G1
+        rectangle1.merge_from_intersection_perimeter(rectangle2)
 
     print("Solving G1...")
-    diff2 = SSOR(rectangle1, func, max_ssor_it)
+    SSOR(rectangle1, func, max_ssor_it)
 
-    # Копируем данные из G1 в G2
-    rectangle2.merge_from_intersection_perimeter(rectangle1)
-    return diff1, diff2
+    if intersection is not None:
+        # Копируем данные из G1 в G2
+        rectangle2.merge_from_intersection_perimeter(rectangle1)
+
+        # Вычисляем норму разности в области пересечения
+        max_diff, l2_norm = rectangle1.compute_norm_in_intersection(rectangle2)
+
+        print(f"Макс. отклонение: {max_diff:.2e}, L2-норма: {l2_norm:.2e}")
+
+    return max_diff, l2_norm
 
 
-def schwartz_method(rectangle1: Rectangle, rectangle2: Rectangle, func, max_it=10000, max_ssor_it=10000):
-    draw_field([rectangle1, rectangle2], name="Начальное состояние")
-    iter_num = 0
+def schwartz_method(rectangle1: Rectangle, rectangle2: Rectangle, rect_array: list[Rectangle], func, max_it=10000, max_ssor_it=10000):
+    draw_field(rect_array, name="Начальное состояние")
+    if rectangle1.get_intersection_coords(rectangle2) is None:
+        max_it = 1
 
     for iter_num in range(max_it):
         print(f"\n\nИтерация {iter_num + 1}")
-        diff1, diff2 = schwarz_step(rectangle1, rectangle2, func, max_ssor_it)
-        max_diff, l2_norm = rectangle1.compute_norm_in_intersection(rectangle2)
-        print(f"Макс. отклонение: {max_diff:.2e}, L2-норма: {l2_norm:.2e}")
+        max_diff, l2_norm = schwarz_step(rectangle1, rectangle2, func, max_ssor_it)
 
-        if max_diff < EPS:
-            draw_field([rectangle1, rectangle2], name=f"Итерация {iter_num + 1} (финальная), отклонение: {max_diff:.2e}, L2: {l2_norm:.2e}")
+        if max_diff is not None and max_diff < EPS:
+            draw_field(rect_array,
+                       name=f"Итерация {iter_num + 1} (финальная), отклонение: {max_diff:.2e}, L2: {l2_norm:.2e}")
             print("Было достигнуто условие сходимости по max_diff.")
             break
 
         if iter_num < 5 or (iter_num + 1) % 10 == 0:
-            draw_field([rectangle1, rectangle2], name=f"Итерация {iter_num + 1}, отклонение: {max_diff:.2e}, L2: {l2_norm:.2e}")
+            add_max_diff = f", отклонение: {max_diff:.2e}, L2: {l2_norm:.2e}" if max_diff is not None else ""
+            draw_field(rect_array,
+                       name=f"Итерация {iter_num + 1}{add_max_diff}")
 
     print(f"Метод Шварца завершён. Выполненных итераций: {iter_num + 1}.")
 
@@ -276,9 +260,9 @@ def SSOR(rect: Rectangle, func, max_it=100000):
                 xi = rect.x + i * hx
                 rhs = func(xi, yj)
                 sum_val = (
-                    (rect.matrix[j][i + 1] + rect.matrix[j][i - 1]) / hx2 +
-                    (rect.matrix[j + 1][i] + rect.matrix[j - 1][i]) / hy2 +
-                    rhs
+                        (rect.matrix[j][i + 1] + rect.matrix[j][i - 1]) / hx2 +
+                        (rect.matrix[j + 1][i] + rect.matrix[j - 1][i]) / hy2 +
+                        rhs
                 )
                 unew = (1 - OMEGA) * rect.matrix[j][i] + OMEGA * sum_val / denom
                 max_diff = max(max_diff, abs(unew - rect.matrix[j][i]))
@@ -291,9 +275,9 @@ def SSOR(rect: Rectangle, func, max_it=100000):
                 xi = rect.x + i * hx
                 rhs = func(xi, yj)
                 sum_val = (
-                    (rect.matrix[j][i + 1] + rect.matrix[j][i - 1]) / hx2 +
-                    (rect.matrix[j + 1][i] + rect.matrix[j - 1][i]) / hy2 +
-                    rhs
+                        (rect.matrix[j][i + 1] + rect.matrix[j][i - 1]) / hx2 +
+                        (rect.matrix[j + 1][i] + rect.matrix[j - 1][i]) / hy2 +
+                        rhs
                 )
                 unew = (1 - OMEGA) * rect.matrix[j][i] + OMEGA * sum_val / denom
                 max_diff = max(max_diff, abs(unew - rect.matrix[j][i]))
@@ -308,16 +292,27 @@ def SSOR(rect: Rectangle, func, max_it=100000):
 
 
 def get_rect():
-    rectangle1 = Rectangle(r1x, r1y, r1w, r1h, grid_step)
-    rectangle1.set_boundary(boundary)
+    rectangle1 = Rectangle(r1x, r1y, r1w, r1h, grid_step).set_boundary(boundary)
 
-    rectangle2 = Rectangle(r2x, r2y, r2w, r2h, grid_step)
-    rectangle2.set_boundary(boundary)
-
+    rectangle2 = Rectangle(r2x, r2y, r2w, r2h, grid_step).set_boundary(boundary)
     return rectangle1, rectangle2
 
 
 if __name__ == '__main__':
-    rect1, rect2 = get_rect()
-    schwartz_method(rect1, rect2, f_source, max_iter_schwarz, max_iter_ssor)
-
+    rects: list[Rectangle] = []
+    scale = 10
+    rect_num = 4
+    for i in range(0, rect_num):
+        rect = Rectangle(i * 2 * scale, i * 2 * scale, 3 * scale, 3 * scale, grid_step).set_boundary(boundary)
+        rects.append(rect)
+    for i in range(len(rects)):
+        for j in range(len(rects)):
+            if i == j:
+                continue
+            rect1 = rects[i]
+            rect2 = rects[j]
+            print("=" * 50)
+            print(f"Рассматриваемые прямоугольники: {i + 1} и {j + 1}")
+            schwartz_method(rect1, rect2, rects, f_source, max_iter_schwarz, max_iter_ssor)
+            print("=" * 50)
+    input()
