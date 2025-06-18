@@ -5,7 +5,7 @@ import sys
 import io
 
 
-from schwarz import get_rect, f_source, max_iter_schwarz, max_iter_ssor, schwarz_step, EPS, Rectangle
+from schwarz import get_two_rects, f_source, max_iter_schwarz, max_iter_ssor, schwarz_step, EPS, Rectangle
 
 
 class Tee:
@@ -125,5 +125,5 @@ def update_graph(n):
 
 # === Запуск сервера ===
 if __name__ == '__main__':
-    rect1, rect2 = get_rect()
+    rect1, rect2 = get_two_rects()
     app.run(debug=True)
